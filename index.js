@@ -185,6 +185,54 @@ async function run() {
             }
         });
 
+        
+        // DELETE tuition (only owner student can delete)
+        app.delete("/tuitions/:id", async (req, res) => {
+            try {
+                const id = req.params.id;
+                const email = req.query.email; // frontend থেকে query হিসেবে আসবে
+
+                if (!email) {
+                    return res.status(400).send({
+                        success: false,
+                        message: "Email required",
+                    });
+                }
+
+                const tuition = await tuitionCollection.findOne({
+                    _id: new ObjectId(id),
+                });
+
+                if (!tuition) {
+                    return res.status(404).send({
+                        success: false,
+                        message: "Tuition not found",
+                    });
+                }
+
+                // 🔐 security check
+                if (tuition.email !== email) {
+                    return res.status(403).send({
+                        success: false,
+                        message: "Unauthorized delete attempt",
+                    });
+                }
+
+                const result = await tuitionCollection.deleteOne({
+                    _id: new ObjectId(id),
+                });
+
+                res.send({ success: true, result });
+            } catch (err) {
+                console.error("Delete tuition error:", err);
+                res.status(500).send({
+                    success: false,
+                    message: err.message,
+                });
+            }
+        });
+
+
 
 
         app.post("/tuitions", async (req, res) => {

@@ -1,9 +1,9 @@
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const stripe = require('stripe')(process.env.STRIPE_SECRET);
+require('dotenv').config()
 
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config()
+const stripe = require('stripe')(process.env.STRIPE_SECRET);
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -43,11 +43,11 @@ async function run() {
         const applicationCollection = db.collection("applications");
 
 
-        
-        
-        app.post('/users', async(req, res) => {
+
+
+        app.post('/users', async (req, res) => {
             const user = req.body;
-            user.role = user.role || 'student'; 
+            user.role = user.role || 'student';
             user.createAt = new Date();
             const email = user.email;
             const existUser = await userCollection.findOne({ email });
@@ -386,7 +386,7 @@ async function run() {
             }
         });
 
-        
+
 
         app.delete("/applications/:id", async (req, res) => {
             const id = req.params.id;
@@ -453,12 +453,67 @@ async function run() {
             }
         });
 
-        
-        
-        
-        
-        
-        
+
+
+        // STRIPE//
+
+        app.post('/create-checkout-session', async (req, res) => {
+            const paymentInfo = req.body;
+            const amount = parseInt(paymentInfo.expectedSalary) * 100
+
+            const session = await stripe.checkout.sessions.create({
+                line_items: [
+                    {
+
+                        price_data: {
+                            currency: 'USD',
+                            product_data: {
+                                name: `Please pay for: ${paymentInfo.tuitionSubject}`
+                            },
+                            unit_amount: amount,
+                        },
+                        quantity: 1,
+                    },
+                ],
+                customer_email: paymentInfo.studentEmail,
+                mode: 'payment',
+                metadata: {
+                    applicationId: paymentInfo.applicationId
+                },
+
+                success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+            })
+            console.log(session);
+            res.send({ url: session.url })
+
+        })
+
+
+        app.patch('/payment-success', async (req, res) => {
+            const sessionId = req.query.session_id;
+            const session = await stripe.checkout.sessions.retrieve(sessionId);
+            
+            if (session.payment_status==='paid') {
+                const id = session.metadata.applicationId;
+                const query = { _id: new ObjectId(id) };
+                const update = {
+                    $set: {
+                        paymentStatus: 'paid',
+                        status: 'approved',
+                        paidAt: new Date()
+                    }
+                }
+                const result=await applicationCollection.updateOne(query,update)
+                res.send(result)
+            }
+            
+            res.send({success:true})
+            
+        })
+
+
+
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {

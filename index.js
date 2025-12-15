@@ -1,4 +1,6 @@
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const stripe = require('stripe')(process.env.STRIPE_SECRET);
+
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config()
@@ -38,6 +40,8 @@ async function run() {
         const db = client.db('tutor-owl');
         const userCollection = db.collection('users');
         const tuitionCollection = db.collection("tuitions");
+        const applicationCollection = db.collection("applications");
+
 
         
         
@@ -53,6 +57,41 @@ async function run() {
             const result = await userCollection.insertOne(user);
             res.send(result);
         })
+
+        app.post("/applications", async (req, res) => {
+            try {
+                const application = req.body;
+
+                // 🔒 duplicate apply check
+                const alreadyApplied = await applicationCollection.findOne({
+                    tuitionId: application.tuitionId,
+                    tutorEmail: application.tutorEmail,
+                });
+
+                if (alreadyApplied) {
+                    return res.send({
+                        success: false,
+                        message: "Already applied",
+                    });
+                }
+
+                // ✅ tuition থেকে budget আনো
+                const tuition = await tuitionCollection.findOne({
+                    _id: new ObjectId(application.tuitionId),
+                });
+
+                application.studentDemand = tuition?.budget || 0; // ⭐ MAIN FIX
+                application.status = "pending";
+                application.createdAt = new Date();
+
+                const result = await applicationCollection.insertOne(application);
+                res.send({ success: true, result });
+            } catch (err) {
+                res.status(500).send({ success: false, message: err.message });
+            }
+        });
+
+
 
 
         // server.js (or your current backend file) - add this after your other routes
@@ -78,6 +117,40 @@ async function run() {
                 res.status(500).send({ success: false, message: err.message || 'Server error' });
             }
         });
+
+        app.get("/applications", async (req, res) => {
+            const email = req.query.email;
+
+            const result = await applicationCollection
+                .find({ tutorEmail: email })
+                .toArray();
+
+            res.send(result);
+        });
+
+
+        // GET applications for student (by studentEmail)
+        app.get("/applications/student/:email", async (req, res) => {
+            try {
+                const email = req.params.email;
+
+                const applications = await applicationCollection
+                    .find({ studentEmail: email })
+                    .toArray();
+
+                res.send({ success: true, applications });
+            } catch (err) {
+                res.status(500).send({ success: false, message: err.message });
+            }
+        });
+
+
+        app.get('/applications/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) };
+            const result = await applicationCollection.findOne(query);
+            res.send(result);
+        })
 
 
 
@@ -137,6 +210,45 @@ async function run() {
 
 
 
+        app.put("/applications/:id", async (req, res) => {
+            const id = req.params.id;
+            const { tutorEmail, qualifications, experience, expectedSalary } = req.body;
+
+            const application = await applicationCollection.findOne({
+                _id: new ObjectId(id),
+            });
+
+            if (!application) {
+                return res.send({ success: false });
+            }
+
+            // 🔒 approved হলে edit করা যাবে না
+            if (application.status !== "pending") {
+                return res.send({ success: false });
+            }
+
+            // 🔒 security check
+            if (application.tutorEmail !== tutorEmail) {
+                return res.send({ success: false });
+            }
+
+            const result = await applicationCollection.updateOne(
+                { _id: new ObjectId(id) },
+                {
+                    $set: {
+                        qualifications,
+                        experience,
+                        expectedSalary,
+                        updatedAt: new Date(),
+                    },
+                }
+            );
+
+            res.send({ success: true, result });
+        });
+
+
+
         // UPDATE tuition (only owner student can update)
         app.put("/tuitions/:id", async (req, res) => {
             try {
@@ -185,7 +297,49 @@ async function run() {
             }
         });
 
-        
+
+        // STUDENT → approve / reject tutor application
+        app.patch("/applications/status/:id", async (req, res) => {
+            try {
+                const id = req.params.id;
+                const { status, studentEmail } = req.body;
+
+                if (!["approved", "rejected", "pending"].includes(status)) {
+                    return res.status(400).send({ success: false });
+                }
+
+                const application = await applicationCollection.findOne({
+                    _id: new ObjectId(id),
+                });
+
+                if (!application) {
+                    return res.status(404).send({ success: false });
+                }
+
+                // 🔐 only owner student
+                if (application.studentEmail !== studentEmail) {
+                    return res.status(403).send({ success: false });
+                }
+
+                await applicationCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    {
+                        $set: {
+                            status,
+                            updatedAt: new Date(),
+                        },
+                    }
+                );
+
+                res.send({ success: true });
+            } catch (err) {
+                res.status(500).send({ success: false });
+            }
+        });
+
+
+
+
         // DELETE tuition (only owner student can delete)
         app.delete("/tuitions/:id", async (req, res) => {
             try {
@@ -230,6 +384,28 @@ async function run() {
                     message: err.message,
                 });
             }
+        });
+
+        
+
+        app.delete("/applications/:id", async (req, res) => {
+            const id = req.params.id;
+            const email = req.query.email;
+
+            const application = await applicationCollection.findOne({
+                _id: new ObjectId(id),
+            });
+
+            if (application.status !== "pending") {
+                return res.send({ success: false });
+            }
+
+            if (application.tutorEmail !== email) {
+                return res.send({ success: false });
+            }
+
+            await applicationCollection.deleteOne({ _id: new ObjectId(id) });
+            res.send({ success: true });
         });
 
 

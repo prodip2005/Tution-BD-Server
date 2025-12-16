@@ -7,6 +7,22 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET);
 const app = express();
 const port = process.env.PORT || 3000;
 
+const crypto = require('crypto');
+
+function generateTrackingId(prefix = 'ZP') {
+    const date = new Date()
+        .toISOString()
+        .slice(0, 10)
+        .replace(/-/g, '');
+
+    const random = crypto
+        .randomBytes(4)
+        .toString('hex')
+        .toUpperCase();
+
+    return `${prefix}-${date}-${random}`;
+}
+
 
 
 app.use(cors());
@@ -41,6 +57,7 @@ async function run() {
         const userCollection = db.collection('users');
         const tuitionCollection = db.collection("tuitions");
         const applicationCollection = db.collection("applications");
+        const paymentCollection = db.collection("payments");
 
 
 
@@ -396,9 +413,7 @@ async function run() {
                 _id: new ObjectId(id),
             });
 
-            if (application.status !== "pending") {
-                return res.send({ success: false });
-            }
+           
 
             if (application.tutorEmail !== email) {
                 return res.send({ success: false });
@@ -407,6 +422,56 @@ async function run() {
             await applicationCollection.deleteOne({ _id: new ObjectId(id) });
             res.send({ success: true });
         });
+
+
+        app.delete("/applications/student/bulk", async (req, res) => {
+            const { ids, email } = req.body;
+
+            if (!email || !Array.isArray(ids) || ids.length === 0) {
+                return res.send({ success: false });
+            }
+
+            const objectIds = ids.map(id => new ObjectId(id));
+
+            const result = await applicationCollection.deleteMany({
+                _id: { $in: objectIds },
+                studentEmail: email,
+            });
+
+            res.send({
+                success: true,
+                deletedCount: result.deletedCount,
+            });
+        });
+
+
+        app.delete("/applications/student/:id", async (req, res) => {
+            const id = req.params.id;
+            const email = req.query.email;
+
+            const application = await applicationCollection.findOne({
+                _id: new ObjectId(id),
+            });
+
+            if (!application) {
+                return res.send({ success: false });
+            }
+
+            // 🔐 only owner student
+            if (application.studentEmail !== email) {
+                return res.send({ success: false });
+            }
+
+            await applicationCollection.deleteOne({ _id: new ObjectId(id) });
+            res.send({ success: true });
+        });
+
+
+
+       
+
+
+
 
 
 
@@ -453,6 +518,17 @@ async function run() {
             }
         });
 
+        app.get('/payments', async (req, res) => {
+            const email = req.query.email;
+
+            const query = {};
+            if (email) {
+                query.customerEmail=email
+            }
+            const result = await paymentCollection.find(query).toArray();
+            res.send(result);
+        })
+
 
 
         // STRIPE//
@@ -478,7 +554,9 @@ async function run() {
                 customer_email: paymentInfo.studentEmail,
                 mode: 'payment',
                 metadata: {
-                    applicationId: paymentInfo.applicationId
+                    applicationId: paymentInfo.applicationId,
+                    applicationName: paymentInfo.applicationName,
+                    subjectName: paymentInfo.tuitionSubject
                 },
 
                 success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
@@ -493,24 +571,80 @@ async function run() {
         app.patch('/payment-success', async (req, res) => {
             const sessionId = req.query.session_id;
             const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+            console.log(session);
             
-            if (session.payment_status==='paid') {
-                const id = session.metadata.applicationId;
-                const query = { _id: new ObjectId(id) };
-                const update = {
-                    $set: {
-                        paymentStatus: 'paid',
-                        status: 'approved',
-                        paidAt: new Date()
-                    }
-                }
-                const result=await applicationCollection.updateOne(query,update)
-                res.send(result)
+
+            const transectionId = session.payment_intent;
+            const double_query = { transectionId: transectionId };
+            const paymentExist = await paymentCollection.findOne(double_query);
+            if (paymentExist) {
+                return res.send({ message: 'Already exist', transectionId,trackingId:paymentExist.trackingId })
             }
-            
-            res.send({success:true})
-            
-        })
+
+
+
+            if (session.payment_status !== 'paid') {
+                return res.send({ success: false });
+            }
+
+            const applicationId = session.metadata.applicationId;
+            const query = { _id: new ObjectId(applicationId) };
+
+            // 🔥 STEP 1: application আগেই load করো
+            const application = await applicationCollection.findOne(query);
+
+            // 🔥 STEP 2: যদি আগেই paid হয়ে থাকে
+            if (application?.paymentStatus === 'paid') {
+                return res.send({
+                    success: true,
+                    transectionId: session.payment_intent,
+                    trackingId: application.trackingId, // ✅ SAME ID
+                });
+            }
+
+            // 🔥 STEP 3: নতুন payment হলে তবেই generate
+            const trackingId = generateTrackingId();
+
+            await applicationCollection.updateOne(query, {
+                $set: {
+                    paymentStatus: 'paid',
+                    status: 'approved',
+                    trackingId: trackingId,
+                },
+            });
+
+            // tuition update
+            await tuitionCollection.updateOne(
+                { _id: new ObjectId(application.tuitionId) },
+                { $set: { status: 'booked', bookedAt: new Date() } }
+            );
+
+            const subjectName = application.tuitionSubject; 
+            const tutorEmail = application.tutorEmail;
+
+
+            await paymentCollection.insertOne({
+                amount: session.amount_total / 100,
+                currency: session.currency,
+                customerEmail: session.customer_email,
+                tutorEmail: tutorEmail,  
+                studentName: application.studentName,
+                applicationId,
+                transectionId: session.payment_intent,
+                paymentStatus: 'paid',
+                paidAt: new Date(),
+                trackingId: trackingId,
+                subjectName,
+            });
+
+            res.send({
+                success: true,
+                transectionId: session.payment_intent,
+                trackingId: trackingId,
+            });
+        });
+
 
 
 

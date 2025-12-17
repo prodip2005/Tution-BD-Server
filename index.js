@@ -36,7 +36,7 @@ const verifyFBToken = async (req, res, next) => {
     const token = req.headers.authorization;
 
     console.log(token);
-    
+
 
     if (!token) {
         return res.status(401).send({ message: 'unauthorized access' })
@@ -109,7 +109,7 @@ async function run() {
         })
 
 
-        app.get("/users", async (req, res) => {
+        app.get("/users", verifyFBToken, async (req, res) => {
             try {
                 const role = req.query.role;
 
@@ -133,7 +133,7 @@ async function run() {
             }
         });
 
-        app.patch("/users/role/:email", async (req, res) => {
+        app.patch("/users/role/:email", verifyFBToken, async (req, res) => {
             try {
                 const rawEmail = req.params.email;
                 const { role } = req.body;
@@ -190,7 +190,7 @@ async function run() {
 
 
 
-        app.delete("/users/:email", async (req, res) => {
+        app.delete("/users/:email", verifyFBToken, async (req, res) => {
             try {
                 const email = req.params.email;
 
@@ -228,7 +228,7 @@ async function run() {
 
 
 
-        app.post("/applications", async (req, res) => {
+        app.post("/applications", verifyFBToken, async (req, res) => {
             try {
                 const application = req.body;
 
@@ -265,7 +265,7 @@ async function run() {
 
 
         // server.js (or your current backend file) - add this after your other routes
-        app.get('/users/:email', async (req, res) => {
+        app.get('/users/:email', verifyFBToken, async (req, res) => {
             try {
                 const rawEmail = req.params.email || '';
                 if (!rawEmail) return res.status(400).send({ success: false, message: 'Email required' });
@@ -288,7 +288,7 @@ async function run() {
             }
         });
 
-        app.get("/applications", async (req, res) => {
+        app.get("/applications", verifyFBToken, async (req, res) => {
             const email = req.query.email;
 
             const result = await applicationCollection
@@ -300,7 +300,7 @@ async function run() {
 
 
         // GET applications for student (by studentEmail)
-        app.get("/applications/student/:email", async (req, res) => {
+        app.get("/applications/student/:email", verifyFBToken, async (req, res) => {
             try {
                 const email = req.params.email;
 
@@ -315,7 +315,7 @@ async function run() {
         });
 
 
-        app.get('/applications/:id', async (req, res) => {
+        app.get('/applications/:id', verifyFBToken, async (req, res) => {
             const id = req.params.id;
             const query = { _id: new ObjectId(id) };
             const result = await applicationCollection.findOne(query);
@@ -325,7 +325,7 @@ async function run() {
 
 
 
-        app.put('/users/profile', async (req, res) => {
+        app.put('/users/profile', verifyFBToken, async (req, res) => {
             try {
                 const {
                     email,
@@ -380,7 +380,7 @@ async function run() {
 
 
 
-        app.put("/applications/:id", async (req, res) => {
+        app.put("/applications/:id", verifyFBToken, async (req, res) => {
             const id = req.params.id;
             const { tutorEmail, qualifications, experience, expectedSalary } = req.body;
 
@@ -420,7 +420,7 @@ async function run() {
 
 
         // UPDATE tuition (only owner student can update)
-        app.put("/tuitions/:id", async (req, res) => {
+        app.put("/tuitions/:id", verifyFBToken, async (req, res) => {
             try {
                 const id = req.params.id;
                 const updatedData = req.body;
@@ -469,7 +469,7 @@ async function run() {
 
 
         // STUDENT → approve / reject tutor application
-        app.patch("/applications/status/:id", async (req, res) => {
+        app.patch("/applications/status/:id", verifyFBToken, async (req, res) => {
             try {
                 const id = req.params.id;
                 const { status, studentEmail } = req.body;
@@ -511,7 +511,7 @@ async function run() {
 
 
         // DELETE tuition (only owner student can delete)
-        app.delete("/tuitions/:id", async (req, res) => {
+        app.delete("/tuitions/:id", verifyFBToken, async (req, res) => {
             try {
                 const id = req.params.id;
                 const email = req.query.email; // frontend থেকে query হিসেবে আসবে
@@ -558,7 +558,7 @@ async function run() {
 
 
 
-        app.delete("/applications/:id", async (req, res) => {
+        app.delete("/applications/:id", verifyFBToken, async (req, res) => {
             const id = req.params.id;
             const email = req.query.email;
 
@@ -566,7 +566,7 @@ async function run() {
                 _id: new ObjectId(id),
             });
 
-           
+
 
             if (application.tutorEmail !== email) {
                 return res.send({ success: false });
@@ -577,7 +577,7 @@ async function run() {
         });
 
 
-        app.delete("/applications/student/bulk", async (req, res) => {
+        app.delete("/applications/student/bulk", verifyFBToken, async (req, res) => {
             const { ids, email } = req.body;
 
             if (!email || !Array.isArray(ids) || ids.length === 0) {
@@ -598,7 +598,7 @@ async function run() {
         });
 
 
-        app.delete("/applications/student/:id", async (req, res) => {
+        app.delete("/applications/student/:id", verifyFBToken, async (req, res) => {
             const id = req.params.id;
             const email = req.query.email;
 
@@ -621,7 +621,6 @@ async function run() {
 
 
 
-       
 
 
 
@@ -629,7 +628,8 @@ async function run() {
 
 
 
-        app.post("/tuitions", async (req, res) => {
+
+        app.post("/tuitions", verifyFBToken, async (req, res) => {
             try {
                 const data = req.body;
                 data.status = "pending";
@@ -703,7 +703,7 @@ async function run() {
 
 
 
-        app.get("/tuitions", async (req, res) => {
+        app.get("/tuitions", verifyFBToken, async (req, res) => {
             const email = req.query.email;
 
             let query = {};
@@ -756,7 +756,7 @@ async function run() {
             res.send({ applied: false });
         });
 
-        app.post("/tutors", async (req, res) => {
+        app.post("/tutors", verifyFBToken, async (req, res) => {
             const data = req.body;
 
             const exist = await tutorCollection.findOne({
@@ -782,7 +782,7 @@ async function run() {
         });
 
 
-        app.patch("/tutors/:id", async (req, res) => {
+        app.patch("/tutors/:id", verifyFBToken, async (req, res) => {
             const id = req.params.id;
             const data = req.body;
 
@@ -815,7 +815,7 @@ async function run() {
         });
 
 
-        
+
         app.patch("/tutors/admin-approval/:id", async (req, res) => {
             try {
                 const id = req.params.id;
@@ -877,14 +877,14 @@ async function run() {
 
 
 
-        app.get('/payments',verifyFBToken, async (req, res) => {
+        app.get('/payments', verifyFBToken, async (req, res) => {
             const email = req.query.email;
 
             const query = {};
             if (email) {
-                query.customerEmail=email
+                query.customerEmail = email
             }
-            const result = await paymentCollection.find(query).sort({paidAt:-1}).toArray();
+            const result = await paymentCollection.find(query).sort({ paidAt: -1 }).toArray();
             res.send(result);
         })
 
@@ -892,7 +892,7 @@ async function run() {
 
         // STRIPE//
 
-        app.post('/create-checkout-session', async (req, res) => {
+        app.post('/create-checkout-session', verifyFBToken, async (req, res) => {
             const paymentInfo = req.body;
             const amount = parseInt(paymentInfo.expectedSalary) * 100
 
@@ -927,18 +927,18 @@ async function run() {
         })
 
 
-        app.patch('/payment-success', async (req, res) => {
+        app.patch('/payment-success', verifyFBToken, async (req, res) => {
             const sessionId = req.query.session_id;
             const session = await stripe.checkout.sessions.retrieve(sessionId);
 
             console.log(session);
-            
+
 
             const transectionId = session.payment_intent;
             const double_query = { transectionId: transectionId };
             const paymentExist = await paymentCollection.findOne(double_query);
             if (paymentExist) {
-                return res.send({ message: 'Already exist', transectionId,trackingId:paymentExist.trackingId })
+                return res.send({ message: 'Already exist', transectionId, trackingId: paymentExist.trackingId })
             }
 
 
@@ -979,7 +979,7 @@ async function run() {
                 { $set: { status: 'booked', bookedAt: new Date() } }
             );
 
-            const subjectName = application.tuitionSubject; 
+            const subjectName = application.tuitionSubject;
             const tutorEmail = application.tutorEmail;
 
 
@@ -987,7 +987,7 @@ async function run() {
                 amount: session.amount_total / 100,
                 currency: session.currency,
                 customerEmail: session.customer_email,
-                tutorEmail: tutorEmail,  
+                tutorEmail: tutorEmail,
                 studentName: application.studentName,
                 applicationId,
                 transectionId: session.payment_intent,

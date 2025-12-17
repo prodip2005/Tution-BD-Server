@@ -7,7 +7,27 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET);
 const app = express();
 const port = process.env.PORT || 3000;
 
+
+
+
+
 const crypto = require('crypto');
+
+
+
+const admin = require("firebase-admin");
+
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
+
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
+
+
+
+
 
 function generateTrackingId(prefix = 'ZP') {
     const date = new Date()
@@ -34,13 +54,14 @@ app.use(express.json())
 
 const verifyFBToken = async (req, res, next) => {
     const token = req.headers.authorization;
-
     console.log(token);
-
+    
 
     if (!token) {
         return res.status(401).send({ message: 'unauthorized access' })
     }
+
+    
 
     try {
         const idToken = token.split(' ')[1];
@@ -156,7 +177,7 @@ async function run() {
                     });
                 }
 
-                // 🔥 LAST ADMIN PROTECTION
+                
                 if (user.role === "admin" && role !== "admin") {
                     const adminCount = await getAdminCount();
                     if (adminCount <= 1) {
@@ -167,14 +188,12 @@ async function run() {
                     }
                 }
 
-                // ✅ USER ROLE UPDATE
+               
                 await userCollection.updateOne(
                     { email },
                     { $set: { role, updatedAt: new Date() } }
                 );
 
-                // 🔥🔥 MAIN LOGIC 🔥🔥
-                // tutor → student হলে tutorCollection থেকে delete
                 if (user.role === "tutor" && role === "student") {
                     const deleteResult = await tutorCollection.deleteOne({ email });
                     console.log("TUTOR DATA REMOVED:", deleteResult);
@@ -203,7 +222,6 @@ async function run() {
                     });
                 }
 
-                // 🔥 LAST ADMIN PROTECTION
                 if (user.role === "admin") {
                     const adminCount = await getAdminCount();
 
@@ -232,7 +250,6 @@ async function run() {
             try {
                 const application = req.body;
 
-                // 🔒 duplicate apply check
                 const alreadyApplied = await applicationCollection.findOne({
                     tuitionId: application.tuitionId,
                     tutorEmail: application.tutorEmail,
@@ -245,12 +262,11 @@ async function run() {
                     });
                 }
 
-                // ✅ tuition থেকে budget আনো
                 const tuition = await tuitionCollection.findOne({
                     _id: new ObjectId(application.tuitionId),
                 });
 
-                application.studentDemand = tuition?.budget || 0; // ⭐ MAIN FIX
+                application.studentDemand = tuition?.budget || 0; 
                 application.status = "pending";
                 application.createdAt = new Date();
 
@@ -264,7 +280,6 @@ async function run() {
 
 
 
-        // server.js (or your current backend file) - add this after your other routes
         app.get('/users/:email', verifyFBToken, async (req, res) => {
             try {
                 const rawEmail = req.params.email || '';
@@ -278,8 +293,7 @@ async function run() {
                     return res.status(404).send({ success: false, message: 'User not found' });
                 }
 
-                // optionally remove sensitive fields before sending
-                // delete user.someSensitiveField;
+      
 
                 res.send({ success: true, user });
             } catch (err) {
@@ -299,7 +313,6 @@ async function run() {
         });
 
 
-        // GET applications for student (by studentEmail)
         app.get("/applications/student/:email", verifyFBToken, async (req, res) => {
             try {
                 const email = req.params.email;
@@ -353,7 +366,6 @@ async function run() {
                         role: role || 'student',
                         image: image || null,
 
-                        // 🔥 NEW PROFILE FIELDS
                         subjects: subjects || '',
                         institution: institution || '',
                         level: level || '',
@@ -392,12 +404,10 @@ async function run() {
                 return res.send({ success: false });
             }
 
-            // 🔒 approved হলে edit করা যাবে না
             if (application.status !== "pending") {
                 return res.send({ success: false });
             }
 
-            // 🔒 security check
             if (application.tutorEmail !== tutorEmail) {
                 return res.send({ success: false });
             }
@@ -419,7 +429,6 @@ async function run() {
 
 
 
-        // UPDATE tuition (only owner student can update)
         app.put("/tuitions/:id", verifyFBToken, async (req, res) => {
             try {
                 const id = req.params.id;
@@ -431,14 +440,12 @@ async function run() {
                     return res.status(400).send({ success: false, message: "Email required" });
                 }
 
-                // find tuition first
                 const tuition = await tuitionCollection.findOne({ _id: new ObjectId(id) });
 
                 if (!tuition) {
                     return res.status(404).send({ success: false, message: "Tuition not found" });
                 }
 
-                // security check: only owner can update
                 if (tuition.email !== email) {
                     return res.status(403).send({ success: false, message: "Unauthorized access" });
                 }
@@ -468,7 +475,6 @@ async function run() {
         });
 
 
-        // STUDENT → approve / reject tutor application
         app.patch("/applications/status/:id", verifyFBToken, async (req, res) => {
             try {
                 const id = req.params.id;
@@ -486,7 +492,6 @@ async function run() {
                     return res.status(404).send({ success: false });
                 }
 
-                // 🔐 only owner student
                 if (application.studentEmail !== studentEmail) {
                     return res.status(403).send({ success: false });
                 }
@@ -510,11 +515,10 @@ async function run() {
 
 
 
-        // DELETE tuition (only owner student can delete)
         app.delete("/tuitions/:id", verifyFBToken, async (req, res) => {
             try {
                 const id = req.params.id;
-                const email = req.query.email; // frontend থেকে query হিসেবে আসবে
+                const email = req.query.email; 
 
                 if (!email) {
                     return res.status(400).send({
@@ -534,7 +538,6 @@ async function run() {
                     });
                 }
 
-                // 🔐 security check
                 if (tuition.email !== email) {
                     return res.status(403).send({
                         success: false,
@@ -610,7 +613,6 @@ async function run() {
                 return res.send({ success: false });
             }
 
-            // 🔐 only owner student
             if (application.studentEmail !== email) {
                 return res.send({ success: false });
             }
@@ -670,7 +672,6 @@ async function run() {
                     return res.send({ success: false, message: "Tuition not found" });
                 }
 
-                // ✅ ONLY tuition status update
                 await tuitionCollection.updateOne(
                     { _id: new ObjectId(id) },
                     {
@@ -681,7 +682,6 @@ async function run() {
                     }
                 );
 
-                // ❌ NO ROLE CHANGE HERE
 
                 res.send({ success: true });
             } catch (err) {
@@ -716,10 +716,9 @@ async function run() {
         });
 
 
-        // get all tutors by role
         app.get("/tutors", async (req, res) => {
             try {
-                const status = req.query.status; // pending / approved / rejected
+                const status = req.query.status; 
 
                 const query = {};
                 if (status) {
@@ -819,13 +818,12 @@ async function run() {
         app.patch("/tutors/admin-approval/:id", async (req, res) => {
             try {
                 const id = req.params.id;
-                const { status } = req.body; // approved | rejected
+                const { status } = req.body; 
 
                 if (!["approved", "rejected"].includes(status)) {
                     return res.send({ success: false, message: "Invalid status" });
                 }
 
-                // 🔎 1. আগে tutor data বের করো
                 const tutor = await tutorCollection.findOne({
                     _id: new ObjectId(id),
                 });
@@ -834,7 +832,6 @@ async function run() {
                     return res.send({ success: false, message: "Tutor not found" });
                 }
 
-                // 🔁 2. tutor collection update
                 await tutorCollection.updateOne(
                     { _id: new ObjectId(id) },
                     {
@@ -845,7 +842,6 @@ async function run() {
                     }
                 );
 
-                // 🔥 3. APPROVED হলে user role = tutor
                 if (status === "approved") {
                     const userEmail = tutor.email
                         ?.trim()
@@ -950,10 +946,8 @@ async function run() {
             const applicationId = session.metadata.applicationId;
             const query = { _id: new ObjectId(applicationId) };
 
-            // 🔥 STEP 1: application আগেই load করো
             const application = await applicationCollection.findOne(query);
 
-            // 🔥 STEP 2: যদি আগেই paid হয়ে থাকে
             if (application?.paymentStatus === 'paid') {
                 return res.send({
                     success: true,
@@ -962,7 +956,6 @@ async function run() {
                 });
             }
 
-            // 🔥 STEP 3: নতুন payment হলে তবেই generate
             const trackingId = generateTrackingId();
 
             await applicationCollection.updateOne(query, {
@@ -973,7 +966,6 @@ async function run() {
                 },
             });
 
-            // tuition update
             await tuitionCollection.updateOne(
                 { _id: new ObjectId(application.tuitionId) },
                 { $set: { status: 'booked', bookedAt: new Date() } }

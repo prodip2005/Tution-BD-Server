@@ -58,6 +58,11 @@ async function run() {
         const tuitionCollection = db.collection("tuitions");
         const applicationCollection = db.collection("applications");
         const paymentCollection = db.collection("payments");
+        const tutorCollection = db.collection("tutors");
+
+        const getAdminCount = async () => {
+            return await userCollection.countDocuments({ role: "admin" });
+        };
 
 
 
@@ -74,6 +79,126 @@ async function run() {
             const result = await userCollection.insertOne(user);
             res.send(result);
         })
+
+
+        app.get("/users", async (req, res) => {
+            try {
+                const role = req.query.role;
+
+                const query = {};
+                if (role) {
+                    query.role = role;
+                }
+
+                const users = await userCollection.find(query).toArray();
+
+                res.send({
+                    success: true,
+                    users
+                });
+            } catch (err) {
+                console.error("GET /users error:", err);
+                res.status(500).send({
+                    success: false,
+                    message: err.message
+                });
+            }
+        });
+
+        app.patch("/users/role/:email", async (req, res) => {
+            try {
+                const rawEmail = req.params.email;
+                const { role } = req.body;
+
+                if (!["admin", "tutor", "student"].includes(role)) {
+                    return res.send({
+                        success: false,
+                        message: "Invalid role",
+                    });
+                }
+
+                const email = rawEmail.trim().toLowerCase();
+
+                const user = await userCollection.findOne({ email });
+
+                if (!user) {
+                    return res.send({
+                        success: false,
+                        message: "User not found",
+                    });
+                }
+
+                // 🔥 LAST ADMIN PROTECTION
+                if (user.role === "admin" && role !== "admin") {
+                    const adminCount = await getAdminCount();
+                    if (adminCount <= 1) {
+                        return res.send({
+                            success: false,
+                            message: "At least one admin must remain",
+                        });
+                    }
+                }
+
+                // ✅ USER ROLE UPDATE
+                await userCollection.updateOne(
+                    { email },
+                    { $set: { role, updatedAt: new Date() } }
+                );
+
+                // 🔥🔥 MAIN LOGIC 🔥🔥
+                // tutor → student হলে tutorCollection থেকে delete
+                if (user.role === "tutor" && role === "student") {
+                    const deleteResult = await tutorCollection.deleteOne({ email });
+                    console.log("TUTOR DATA REMOVED:", deleteResult);
+                }
+
+                res.send({ success: true });
+            } catch (err) {
+                console.error("PATCH /users/role error:", err);
+                res.status(500).send({ success: false });
+            }
+        });
+
+
+
+
+        app.delete("/users/:email", async (req, res) => {
+            try {
+                const email = req.params.email;
+
+                const user = await userCollection.findOne({ email });
+
+                if (!user) {
+                    return res.send({
+                        success: false,
+                        message: "User not found",
+                    });
+                }
+
+                // 🔥 LAST ADMIN PROTECTION
+                if (user.role === "admin") {
+                    const adminCount = await getAdminCount();
+
+                    if (adminCount <= 1) {
+                        return res.send({
+                            success: false,
+                            message: "Cannot delete the last admin",
+                        });
+                    }
+                }
+
+                await userCollection.deleteOne({ email });
+
+                res.send({ success: true });
+            } catch (err) {
+                console.error("DELETE /users error:", err);
+                res.status(500).send({ success: false });
+            }
+        });
+
+
+
+
 
         app.post("/applications", async (req, res) => {
             try {
@@ -480,6 +605,7 @@ async function run() {
             try {
                 const data = req.body;
                 data.status = "pending";
+                data.tuition_status = "pending";
                 data.createdAt = new Date();
 
                 const result = await tuitionCollection.insertOne(data);
@@ -489,6 +615,64 @@ async function run() {
                 res.status(500).send({ success: false, message: err.message });
             }
         });
+
+        app.get("/tuitions/admin/pending", async (req, res) => {
+            const result = await tuitionCollection
+                .find({ tuition_status: "pending" })
+                .toArray();
+
+            res.send(result);
+        });
+
+
+        app.patch("/tuitions/admin/review/:id", async (req, res) => {
+            try {
+                const { tuition_status } = req.body;
+                const id = req.params.id;
+
+                if (!["approved", "rejected"].includes(tuition_status)) {
+                    return res.send({ success: false });
+                }
+
+                const tuition = await tuitionCollection.findOne({
+                    _id: new ObjectId(id),
+                });
+
+                if (!tuition) {
+                    return res.send({ success: false, message: "Tuition not found" });
+                }
+
+                // ✅ ONLY tuition status update
+                await tuitionCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    {
+                        $set: {
+                            tuition_status,
+                            reviewedAt: new Date(),
+                        },
+                    }
+                );
+
+                // ❌ NO ROLE CHANGE HERE
+
+                res.send({ success: true });
+            } catch (err) {
+                console.error("Admin tuition review error:", err);
+                res.status(500).send({ success: false });
+            }
+        });
+
+
+
+        app.get("/tuitions/public", async (req, res) => {
+            const result = await tuitionCollection.find({
+                tuition_status: "approved"
+            }).toArray();
+
+            res.send(result);
+        });
+
+
 
 
         app.get("/tuitions", async (req, res) => {
@@ -507,16 +691,163 @@ async function run() {
         // get all tutors by role
         app.get("/tutors", async (req, res) => {
             try {
-                const tutors = await userCollection
-                    .find({ role: "tutor" })
-                    .toArray();
+                const status = req.query.status; // pending / approved / rejected
 
-                res.send({ success: true, tutors });
+                const query = {};
+                if (status) {
+                    query.status = status;
+                }
+
+                const tutors = await tutorCollection.find(query).toArray();
+
+                res.send({
+                    success: true,
+                    tutors
+                });
             } catch (err) {
                 console.error("GET /tutors error:", err);
                 res.status(500).send({ success: false, message: err.message });
             }
         });
+
+
+
+
+        app.get("/tutors/check/:email", async (req, res) => {
+            const email = req.params.email;
+
+            const tutor = await tutorCollection.findOne({ email });
+
+            if (tutor) {
+                return res.send({
+                    applied: true,
+                    tutor,
+                });
+            }
+
+            res.send({ applied: false });
+        });
+
+        app.post("/tutors", async (req, res) => {
+            const data = req.body;
+
+            const exist = await tutorCollection.findOne({
+                email: data.email,
+            });
+
+            if (exist) {
+                return res.send({
+                    success: false,
+                    message: "Already applied",
+                });
+            }
+
+            data.status = "pending";
+            data.createdAt = new Date();
+
+            const result = await tutorCollection.insertOne(data);
+
+            res.send({
+                success: true,
+                result,
+            });
+        });
+
+
+        app.patch("/tutors/:id", async (req, res) => {
+            const id = req.params.id;
+            const data = req.body;
+
+            const tutor = await tutorCollection.findOne({
+                _id: new ObjectId(id),
+            });
+
+            if (!tutor) {
+                return res.send({ success: false });
+            }
+
+            if (tutor.status !== "pending") {
+                return res.send({
+                    success: false,
+                    message: "Cannot edit after approval",
+                });
+            }
+
+            await tutorCollection.updateOne(
+                { _id: new ObjectId(id) },
+                {
+                    $set: {
+                        ...data,
+                        updatedAt: new Date(),
+                    },
+                }
+            );
+
+            res.send({ success: true });
+        });
+
+
+        
+        app.patch("/tutors/admin-approval/:id", async (req, res) => {
+            try {
+                const id = req.params.id;
+                const { status } = req.body; // approved | rejected
+
+                if (!["approved", "rejected"].includes(status)) {
+                    return res.send({ success: false, message: "Invalid status" });
+                }
+
+                // 🔎 1. আগে tutor data বের করো
+                const tutor = await tutorCollection.findOne({
+                    _id: new ObjectId(id),
+                });
+
+                if (!tutor) {
+                    return res.send({ success: false, message: "Tutor not found" });
+                }
+
+                // 🔁 2. tutor collection update
+                await tutorCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    {
+                        $set: {
+                            status,
+                            reviewedAt: new Date(),
+                        },
+                    }
+                );
+
+                // 🔥 3. APPROVED হলে user role = tutor
+                if (status === "approved") {
+                    const userEmail = tutor.email
+                        ?.trim()
+                        .toLowerCase();
+
+                    const roleResult = await userCollection.updateOne(
+                        { email: userEmail },
+                        {
+                            $set: {
+                                role: "tutor",
+                                updatedAt: new Date(),
+                            },
+                        }
+                    );
+
+                    console.log("USER ROLE UPDATE:", roleResult);
+                }
+
+                res.send({ success: true });
+            } catch (err) {
+                console.error("Tutor approval error:", err);
+                res.status(500).send({ success: false });
+            }
+        });
+
+
+
+
+
+
 
         app.get('/payments', async (req, res) => {
             const email = req.query.email;
@@ -525,7 +856,7 @@ async function run() {
             if (email) {
                 query.customerEmail=email
             }
-            const result = await paymentCollection.find(query).toArray();
+            const result = await paymentCollection.find(query).sort({paidAt:-1}).toArray();
             res.send(result);
         })
 

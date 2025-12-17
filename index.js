@@ -29,6 +29,34 @@ app.use(cors());
 app.use(express.json())
 
 
+
+
+
+const verifyFBToken = async (req, res, next) => {
+    const token = req.headers.authorization;
+
+    console.log(token);
+    
+
+    if (!token) {
+        return res.status(401).send({ message: 'unauthorized access' })
+    }
+
+    try {
+        const idToken = token.split(' ')[1];
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        console.log('decoded in the token', decoded);
+        req.decoded_email = decoded.email;
+        next();
+    }
+    catch (err) {
+        return res.status(401).send({ message: 'unauthorized access' })
+    }
+
+
+}
+
+
 app.get('/', (req, res) => {
     res.send('Server is Running');
 })
@@ -849,7 +877,7 @@ async function run() {
 
 
 
-        app.get('/payments', async (req, res) => {
+        app.get('/payments',verifyFBToken, async (req, res) => {
             const email = req.query.email;
 
             const query = {};

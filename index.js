@@ -55,13 +55,13 @@ app.use(express.json())
 const verifyFBToken = async (req, res, next) => {
     const token = req.headers.authorization;
     console.log(token);
-    
+
 
     if (!token) {
         return res.status(401).send({ message: 'unauthorized access' })
     }
 
-    
+
 
     try {
         const idToken = token.split(' ')[1];
@@ -109,6 +109,22 @@ async function run() {
         const paymentCollection = db.collection("payments");
         const tutorCollection = db.collection("tutors");
 
+
+        // MIDDLEWARE
+
+        const verifyAdmin = async (req, res, next) => {
+            const email = req.decoded_email;
+            const query = { email };
+            const user = await userCollection.findOne(query);
+
+            if (!user || user.role !=='admin') {
+                return res.status(403).send({message:'forbidden access'})
+            }
+            next()
+        }
+
+
+
         const getAdminCount = async () => {
             return await userCollection.countDocuments({ role: "admin" });
         };
@@ -154,7 +170,7 @@ async function run() {
             }
         });
 
-        app.patch("/users/role/:email", verifyFBToken, async (req, res) => {
+        app.patch("/users/role/:email", verifyFBToken, verifyAdmin, async (req, res) => {
             try {
                 const rawEmail = req.params.email;
                 const { role } = req.body;
@@ -177,7 +193,7 @@ async function run() {
                     });
                 }
 
-                
+
                 if (user.role === "admin" && role !== "admin") {
                     const adminCount = await getAdminCount();
                     if (adminCount <= 1) {
@@ -188,7 +204,7 @@ async function run() {
                     }
                 }
 
-               
+
                 await userCollection.updateOne(
                     { email },
                     { $set: { role, updatedAt: new Date() } }
@@ -209,7 +225,7 @@ async function run() {
 
 
 
-        app.delete("/users/:email", verifyFBToken, async (req, res) => {
+        app.delete("/users/:email", verifyFBToken, verifyAdmin, async (req, res) => {
             try {
                 const email = req.params.email;
 
@@ -266,7 +282,7 @@ async function run() {
                     _id: new ObjectId(application.tuitionId),
                 });
 
-                application.studentDemand = tuition?.budget || 0; 
+                application.studentDemand = tuition?.budget || 0;
                 application.status = "pending";
                 application.createdAt = new Date();
 
@@ -293,7 +309,7 @@ async function run() {
                     return res.status(404).send({ success: false, message: 'User not found' });
                 }
 
-      
+
 
                 res.send({ success: true, user });
             } catch (err) {
@@ -304,6 +320,10 @@ async function run() {
 
         app.get("/applications", verifyFBToken, async (req, res) => {
             const email = req.query.email;
+            if (email !== req.decoded_email) {
+                return res.status(403).send({ success: false });
+            }
+
 
             const result = await applicationCollection
                 .find({ tutorEmail: email })
@@ -316,6 +336,10 @@ async function run() {
         app.get("/applications/student/:email", verifyFBToken, async (req, res) => {
             try {
                 const email = req.params.email;
+                if (req.params.email !== req.decoded_email) {
+                    return res.status(403).send({ success: false });
+                }
+
 
                 const applications = await applicationCollection
                     .find({ studentEmail: email })
@@ -518,7 +542,7 @@ async function run() {
         app.delete("/tuitions/:id", verifyFBToken, async (req, res) => {
             try {
                 const id = req.params.id;
-                const email = req.query.email; 
+                const email = req.query.email;
 
                 if (!email) {
                     return res.status(400).send({
@@ -646,7 +670,7 @@ async function run() {
             }
         });
 
-        app.get("/tuitions/admin/pending", async (req, res) => {
+        app.get("/tuitions/admin/pending",verifyFBToken,verifyAdmin, async (req, res) => {
             const result = await tuitionCollection
                 .find({ tuition_status: "pending" })
                 .toArray();
@@ -655,7 +679,7 @@ async function run() {
         });
 
 
-        app.patch("/tuitions/admin/review/:id", async (req, res) => {
+        app.patch("/tuitions/admin/review/:id", verifyFBToken, verifyAdmin, async (req, res) => {
             try {
                 const { tuition_status } = req.body;
                 const id = req.params.id;
@@ -716,9 +740,9 @@ async function run() {
         });
 
 
-        app.get("/tutors", async (req, res) => {
+        app.get("/tutors", verifyFBToken, verifyAdmin, async (req, res) => {
             try {
-                const status = req.query.status; 
+                const status = req.query.status;
 
                 const query = {};
                 if (status) {
@@ -815,10 +839,10 @@ async function run() {
 
 
 
-        app.patch("/tutors/admin-approval/:id", async (req, res) => {
+        app.patch("/tutors/admin-approval/:id",verifyFBToken,verifyAdmin, async (req, res) => {
             try {
                 const id = req.params.id;
-                const { status } = req.body; 
+                const { status } = req.body;
 
                 if (!["approved", "rejected"].includes(status)) {
                     return res.send({ success: false, message: "Invalid status" });

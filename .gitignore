@@ -1,3 +1,4 @@
 node_modules
 .env
 Tutor_Owl.json
+.vercel

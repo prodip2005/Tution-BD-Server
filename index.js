@@ -728,16 +728,52 @@ async function run() {
 
 
         app.get("/tuitions", verifyFBToken, async (req, res) => {
-            const email = req.query.email;
+            try {
+                const { email, sortBy, search } = req.query;
 
-            let query = {};
-            if (email) {
-                query.email = email;
+                let query = {};
+
+                if (email) {
+                    query.email = email;
+                }
+
+                // 🔍 SEARCH (location / subject / class)
+                if (search) {
+                    query.$or = [
+                        { subject: { $regex: search, $options: "i" } },
+                        { location: { $regex: search, $options: "i" } },
+                        { class: { $regex: search, $options: "i" } },
+                    ];
+                }
+
+                let sortQuery = {};
+
+                if (!sortBy || sortBy === "latest") {
+                    sortQuery = { createdAt: -1 };
+                }
+                if (sortBy === "location") {
+                    sortQuery = { location: 1 };
+                }
+                if (sortBy === "class") {
+                    sortQuery = { class: -1 }; // Higher → Lower
+                }
+                if (sortBy === "subject") {
+                    sortQuery = { subject: 1 };
+                }
+
+                const result = await tuitionCollection
+                    .find(query)
+                    .sort(sortQuery)
+                    .toArray();
+
+                res.send(result);
+            } catch (err) {
+                console.error("GET /tuitions error:", err);
+                res.status(500).send({ success: false });
             }
-
-            const result = await tuitionCollection.find(query).toArray();
-            res.send(result);
         });
+
+
 
 
         app.get("/tutors", verifyFBToken, verifyAdmin, async (req, res) => {
